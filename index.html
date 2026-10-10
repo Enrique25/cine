@@ -150,6 +150,7 @@ nav{ display:flex; background:var(--surface); border-top:1px solid var(--line); 
 .perf::before{ left:-12px; } .perf::after{ right:-12px; }
 .t-bot{ padding:16px 22px 22px; }
 .t-bot p{ margin:0 0 4px; }
+main .perf::before, main .perf::after{ background:var(--bg); }
 .win-actions{ width:min(100%, 360px); display:flex; gap:8px; margin-top:18px; }
 .win-actions .btn{ flex:1; background:transparent; border-color:#3b4a73; color:#eaf0fb; }
 .win-actions .btn.primary{ background:#f2b632; border-color:#f2b632; color:#3a2a00; }
@@ -605,12 +606,25 @@ function viewRuleta(v){
     <span class="t"><b>${esc(it.m.title)}</b><span>${esc(it.p.name)} · ${it.p.points} ${it.p.points === 1 ? 'punto' : 'puntos'}</span></span>
     <span class="pct">${total ? Math.round(it.w / total * 100) : 0}%</span></li>`).join('');
   const hist = S.history.slice(0, 5).map(h => `<li><span><b>${esc(h.title)}</b> · ${esc(h.name)}</span><span>${new Date(h.date).toLocaleDateString('es-ES', { day:'numeric', month:'short' })}</span></li>`).join('');
+  if (S.winner){
+    const w = S.winner;
+    v.innerHTML = `
+      <div class="ticket" style="margin:14px auto 0">
+        <div class="t-top">${w.poster ? thumb(w) : ''}<div><small>Hoy vemos</small><h2>${esc(w.title)}</h2>${w.year ? `<small>${esc(w.year)}</small>` : ''}</div></div>
+        <div class="perf"></div>
+        <div class="t-bot"><p>Propuesta de <b>${esc(w.name)}</b></p><p style="font-size:14px;opacity:.8">Ya vuelve a 0 puntos.</p></div>
+      </div>
+      <button class="btn primary block" style="margin-top:16px" data-act="newsession">Nueva sesión</button>
+      ${hist ? `<h2>Últimas elegidas</h2><ul class="list hist" style="gap:0">${hist}</ul>` : ''}`;
+    return;
+  }
   v.innerHTML = `
     <div class="wheelwrap">
       <svg class="pointer" viewBox="0 0 30 36" aria-hidden="true"><path d="M15 35 3 9C3 3 9 1 15 1s12 2 12 8z" fill="#e0574f" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/></svg>
       <canvas id="wheel" aria-label="Ruleta de películas"></canvas>
     </div>
     <button class="btn primary block" id="spinBtn" data-act="spin" ${live.length < 2 || spinning ? 'disabled' : ''}>${live.length < 2 ? 'Necesitas al menos 2 propuestas con puntos' : 'Girar la ruleta'}</button>
+    <button class="btn block" style="margin-top:8px" data-act="newsession">Nueva sesión</button>
     ${items.length ? `<h2>Probabilidades</h2><ul class="list legend">${legend}</ul>` : ''}
     ${hist ? `<h2>Últimas elegidas</h2><ul class="list hist" style="gap:0">${hist}</ul>` : ''}`;
   drawWheel();
@@ -696,6 +710,7 @@ function finish(it){
   it.p.points = 0;                                  // se resetea la probabilidad del ganador
   S.history.unshift({ title: it.m.title, year: it.m.year, name: it.p.name, date: Date.now() });
   S.history = S.history.slice(0, 30);
+  S.winner = { title: it.m.title, year: it.m.year, name: it.p.name, poster: it.m.poster };
   save();
   try { navigator.vibrate && navigator.vibrate([80, 60, 160]); } catch(e){}
   const w = $('#win');
@@ -723,6 +738,7 @@ $('#win').addEventListener('click', e => {
   $('#win').hidden = true;
   if (b.dataset.win === 'new'){
     S.people.forEach(p => p.present = false);
+    S.winner = null;
     S.movies = []; sel = null; rot = 0; S.tab = 'asistencia'; save();
     toast('Sesión nueva: marca quién viene');
   }
@@ -730,6 +746,12 @@ $('#win').addEventListener('click', e => {
 });
 
 /* ---------- Acciones ---------- */
+function newSession(){
+  S.people.forEach(p => p.present = false);
+  S.winner = null;
+  S.movies = []; sel = null; rot = 0; S.tab = 'asistencia'; save();
+  toast('Sesión nueva: marca quién viene'); render();
+}
 function addPerson(){
   const inp = $('#newName'); if (!inp) return;
   const name = inp.value.trim().replace(/\s+/g, ' ');
@@ -764,6 +786,7 @@ $('#view').addEventListener('click', e => {
     case 'manual': if (lastQuery.trim()) addMovie({ title: lastQuery.trim(), year: '', poster: '' }); break;
     case 'rmmovie': S.movies = S.movies.filter(m => m.id !== id); save(); render(); break;
     case 'goto': go(id); break;
+    case 'newsession': ask('¿Empezar una nueva sesión? Se borran la asistencia y las propuestas; los puntos se conservan.', 'Nueva sesión', newSession); break;
     case 'spin': spin(); break;
     case 'resetall': ask('Se borrarán participantes, puntos, propuestas e historial. ¿Seguro?', 'Borrar todo', () => {
         S = { people: [], movies: [], history: [], tab: 'club' }; sel = null; rot = 0; save(); render(); }); break;
@@ -788,7 +811,7 @@ function showHelp(){
       <li><b>Asistencia:</b> marca quién ha venido hoy. Cada asistente gana 1 punto.</li>
       <li><b>Pelis:</b> elige a una persona y busca su peli. Se añade a la ruleta.</li>
       <li><b>Ruleta:</b> cuantos más puntos tiene alguien, más grande es el trozo de su peli. Gira y sale la ganadora.</li>
-      <li>Al ganar, esa persona vuelve a 0 puntos. Pulsa «Nueva sesión» para preparar la siguiente.</li>
+      <li>Al ganar, esa persona vuelve a 0 puntos. Para preparar la siguiente, pulsa «Nueva sesión» (también está en la pestaña Ruleta).</li>
     </ol>
     <p>Los datos se guardan en este móvil.</p>
     <button class="btn primary block" data-dlg="no">Entendido</button>
