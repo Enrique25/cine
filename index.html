@@ -435,14 +435,31 @@ function localSearch(q){
 }
 
 /* ---------- Búsqueda online (iTunes Search API: sin clave) ---------- */
+function jsonp(url){
+  return new Promise((resolve, reject) => {
+    const cb = 'cf_' + Math.random().toString(36).slice(2);
+    const s = document.createElement('script');
+    const clean = () => { clearTimeout(to); delete window[cb]; s.remove(); };
+    const to = setTimeout(() => { clean(); reject(new Error('timeout')); }, 6000);
+    window[cb] = d => { clean(); resolve(d); };
+    s.onerror = () => { clean(); reject(new Error('script')); };
+    s.src = url + '&callback=' + cb;
+    document.head.appendChild(s);
+  });
+}
 async function onlineSearch(q){
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), 4500);
   try {
     const url = 'https://itunes.apple.com/search?media=movie&entity=movie&country=es&limit=14&term=' + encodeURIComponent(q);
-    const r = await fetch(url, { signal: ctrl.signal });
-    if (!r.ok) throw new Error('http');
-    const j = await r.json();
+    let j;
+    try {
+      const r = await fetch(url, { signal: ctrl.signal });
+      if (!r.ok) throw new Error('http');
+      j = await r.json();
+    } catch(err){
+      j = await jsonp(url);   // plan B si el navegador bloquea fetch (CORS)
+    }
     const seen = new Set();
     return (j.results || []).filter(x => x.trackName).map(x => ({
       title: x.trackName,
@@ -460,12 +477,12 @@ async function runSearch(q){
   if (q.trim().length < 2){ lastResults = []; box.innerHTML = ''; st.textContent = 'Escribe al menos 2 letras.'; return; }
   st.textContent = 'Buscando…';
   let list = [], mode = 'online';
-  try { list = await onlineSearch(q); } catch(e){ list = []; mode = 'offline'; }
-  if (!list.length){ const loc = localSearch(q); if (loc.length || mode === 'offline'){ list = loc; mode = 'offline'; } }
+  try { list = await onlineSearch(q); } catch(e){ list = []; mode = 'error'; }
+  if (!list.length){ list = localSearch(q); if (mode === 'online') mode = 'empty'; }
   if (seq !== searchSeq || !$('#results')) return;
   lastResults = list;
-  st.textContent = list.length
-    ? (mode === 'online' ? 'Resultados de internet' : 'Sin conexión: catálogo del club (' + CATALOG.length + ' pelis)')
+  st.textContent = mode === 'online' ? 'Resultados de internet'
+    : list.length ? (mode === 'error' ? 'No se pudo contactar con el buscador: mostrando el catálogo del club' : 'Sin resultados en internet: mostrando el catálogo del club')
     : 'No encontramos esa peli.';
   $('#results').innerHTML = list.map((m, i) => resHTML(m, i)).join('') +
     `<button class="res" data-act="manual"><span class="thumb">+</span><span class="t"><b>Añadir «${esc(q.trim())}» tal cual</b><span>Si no aparece en la búsqueda</span></span></button>`;
@@ -515,7 +532,7 @@ function viewClub(v){
       <input id="newName" type="text" placeholder="Nombre" maxlength="30" autocomplete="off" aria-label="Nombre del participante">
       <button class="btn primary" data-act="add">Añadir</button>
     </div>
-    <p class="hint">Todos empiezan con 1 punto. Los botones − y + sirven para corregir puntos a mano.</p>
+    <p class="hint">Todos empiezan con 0 puntos. Los botones − y + sirven para corregir puntos a mano.</p>
     ${S.people.length ? `<ul class="list">${rows}</ul>` : `<div class="empty">Aún no hay participantes.<br>Escribe un nombre arriba para empezar.</div>`}
     ${S.people.length ? `<h2>Zona de reinicio</h2><button class="btn danger block" data-act="resetall">Borrar todo y empezar de cero</button>` : ''}`;
 }
@@ -584,7 +601,7 @@ function viewRuleta(v){
   const total = items.reduce((a, it) => a + it.w, 0);
   const legend = items.map((it, i) => `
     <li class="row"><span class="dot" style="background:${colorFor(i, items.length)}"></span>
-    <span class="t"><b>${esc(it.m.title)}</b><span>${esc(it.p.name)} · ${it.w} ${it.w === 1 ? 'punto' : 'puntos'}</span></span>
+    <span class="t"><b>${esc(it.m.title)}</b><span>${esc(it.p.name)} · ${it.p.points} ${it.p.points === 1 ? 'punto' : 'puntos'}</span></span>
     <span class="pct">${Math.round(it.w / total * 100)}%</span></li>`).join('');
   const hist = S.history.slice(0, 5).map(h => `<li><span><b>${esc(h.title)}</b> · ${esc(h.name)}</span><span>${new Date(h.date).toLocaleDateString('es-ES', { day:'numeric', month:'short' })}</span></li>`).join('');
   v.innerHTML = `
@@ -675,7 +692,7 @@ function spin(){
 
 function finish(it){
   const prev = it.p.points;
-  it.p.points = 1;                                  // se resetea la probabilidad del ganador
+  it.p.points = 0;                                  // se resetea la probabilidad del ganador
   S.history.unshift({ title: it.m.title, year: it.m.year, name: it.p.name, date: Date.now() });
   S.history = S.history.slice(0, 30);
   save();
@@ -690,7 +707,7 @@ function finish(it){
       <div class="perf"></div>
       <div class="t-bot">
         <p>Propuesta de <b>${esc(it.p.name)}</b></p>
-        <p style="font-size:14px;opacity:.8">Sus puntos vuelven de ${prev} a 1.</p>
+        <p style="font-size:14px;opacity:.8">Sus puntos vuelven de ${prev} a 0.</p>
       </div>
     </div>
     <div class="win-actions">
@@ -717,7 +734,7 @@ function addPerson(){
   const name = inp.value.trim().replace(/\s+/g, ' ');
   if (!name) return;
   if (S.people.some(p => norm(p.name) === norm(name))){ toast('Ya existe ' + name); return; }
-  S.people.push({ id: uid(), name, points: 1, present: false });
+  S.people.push({ id: uid(), name, points: 0, present: false });
   save(); render();
   const n = $('#newName'); if (n) n.focus();
 }
@@ -737,10 +754,10 @@ $('#view').addEventListener('click', e => {
   switch (act){
     case 'add': addPerson(); break;
     case 'inc': if (p){ p.points++; save(); render(); } break;
-    case 'dec': if (p){ p.points = Math.max(1, p.points - 1); save(); render(); } break;
+    case 'dec': if (p){ p.points = Math.max(0, p.points - 1); save(); render(); } break;
     case 'del': if (p) ask('¿Eliminar a ' + p.name + ' del club?', 'Eliminar', () => {
         S.people = S.people.filter(x => x.id !== p.id); S.movies = S.movies.filter(m => m.personId !== p.id); save(); render(); }); break;
-    case 'toggle': if (p){ p.present = !p.present; p.points = p.present ? p.points + 1 : Math.max(1, p.points - 1); save(); render(); } break;
+    case 'toggle': if (p){ p.present = !p.present; p.points = p.present ? p.points + 1 : Math.max(0, p.points - 1); save(); render(); } break;
     case 'sel': sel = (sel === id) ? null : id; lastQuery = ''; searchSeq++; render(); break;
     case 'pick': if (lastResults[+i]) addMovie(lastResults[+i]); break;
     case 'manual': if (lastQuery.trim()) addMovie({ title: lastQuery.trim(), year: '', poster: '' }); break;
@@ -766,11 +783,11 @@ function showHelp(){
   d.innerHTML = `<div class="dlg-card help" role="dialog" aria-label="Cómo funciona">
     <h3>Cómo funciona</h3>
     <ol>
-      <li><b>Club:</b> añade a los participantes. Todos empiezan con 1 punto.</li>
+      <li><b>Club:</b> añade a los participantes. Todos empiezan con 0 puntos.</li>
       <li><b>Asistencia:</b> marca quién ha venido hoy. Cada asistente gana 1 punto.</li>
       <li><b>Pelis:</b> elige a una persona y busca su peli. Se añade a la ruleta.</li>
       <li><b>Ruleta:</b> cuantos más puntos tiene alguien, más grande es el trozo de su peli. Gira y sale la ganadora.</li>
-      <li>Al ganar, esa persona vuelve a 1 punto. Pulsa «Nueva sesión» para preparar la siguiente.</li>
+      <li>Al ganar, esa persona vuelve a 0 puntos. Pulsa «Nueva sesión» para preparar la siguiente.</li>
     </ol>
     <p>Los datos se guardan en este móvil.</p>
     <button class="btn primary block" data-dlg="no">Entendido</button>
