@@ -588,7 +588,7 @@ function viewPelis(v){
 const COLORS = ['#f2b632', '#1f8a85', '#e0574f', '#4b6cb7', '#8e5ea2', '#e78a3f', '#3aa56b', '#d9648f'];
 function lum(hex){ const n = parseInt(hex.slice(1), 16); const r = n >> 16, g = (n >> 8) & 255, b = n & 255; return (0.299*r + 0.587*g + 0.114*b) / 255; }
 function wheelItems(){
-  return S.movies.map(m => { const p = person(m.personId); return p ? { m, p, w: Math.max(1, p.points) } : null; }).filter(Boolean);
+  return S.movies.map(m => { const p = person(m.personId); return p ? { m, p, w: p.points } : null; }).filter(Boolean);
 }
 function colorFor(i, n){
   let c = i % COLORS.length;
@@ -599,17 +599,18 @@ function colorFor(i, n){
 function viewRuleta(v){
   const items = wheelItems();
   const total = items.reduce((a, it) => a + it.w, 0);
+  const live = items.filter(it => it.w > 0);
   const legend = items.map((it, i) => `
-    <li class="row"><span class="dot" style="background:${colorFor(i, items.length)}"></span>
+    <li class="row"><span class="dot" style="background:${it.w > 0 ? colorFor(live.indexOf(it), live.length) : 'var(--line)'}"></span>
     <span class="t"><b>${esc(it.m.title)}</b><span>${esc(it.p.name)} · ${it.p.points} ${it.p.points === 1 ? 'punto' : 'puntos'}</span></span>
-    <span class="pct">${Math.round(it.w / total * 100)}%</span></li>`).join('');
+    <span class="pct">${total ? Math.round(it.w / total * 100) : 0}%</span></li>`).join('');
   const hist = S.history.slice(0, 5).map(h => `<li><span><b>${esc(h.title)}</b> · ${esc(h.name)}</span><span>${new Date(h.date).toLocaleDateString('es-ES', { day:'numeric', month:'short' })}</span></li>`).join('');
   v.innerHTML = `
     <div class="wheelwrap">
       <svg class="pointer" viewBox="0 0 30 36" aria-hidden="true"><path d="M15 35 3 9C3 3 9 1 15 1s12 2 12 8z" fill="#e0574f" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/></svg>
       <canvas id="wheel" aria-label="Ruleta de películas"></canvas>
     </div>
-    <button class="btn primary block" id="spinBtn" data-act="spin" ${items.length < 2 || spinning ? 'disabled' : ''}>${items.length < 2 ? 'Necesitas al menos 2 propuestas' : 'Girar la ruleta'}</button>
+    <button class="btn primary block" id="spinBtn" data-act="spin" ${live.length < 2 || spinning ? 'disabled' : ''}>${live.length < 2 ? 'Necesitas al menos 2 propuestas con puntos' : 'Girar la ruleta'}</button>
     ${items.length ? `<h2>Probabilidades</h2><ul class="list legend">${legend}</ul>` : ''}
     ${hist ? `<h2>Últimas elegidas</h2><ul class="list hist" style="gap:0">${hist}</ul>` : ''}`;
   drawWheel();
@@ -633,7 +634,7 @@ function drawWheel(){
   const ink = css.getPropertyValue('--ink').trim() || '#15213b';
   const muted = css.getPropertyValue('--muted').trim() || '#5d6b85';
   const cx = size / 2, R = size / 2 - 8;
-  const items = wheelItems();
+  const items = wheelItems().filter(it => it.w > 0);
   if (!items.length){
     ctx.beginPath(); ctx.arc(cx, cx, R, 0, TAU); ctx.setLineDash([8, 8]); ctx.lineWidth = 3; ctx.strokeStyle = muted; ctx.stroke(); ctx.setLineDash([]);
     ctx.fillStyle = muted; ctx.font = `600 ${Math.round(size / 22)}px Figtree, system-ui, sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -664,7 +665,7 @@ function drawWheel(){
 /* ---------- Sorteo ---------- */
 function spin(){
   if (spinning) return;
-  const items = wheelItems();
+  const items = wheelItems().filter(it => it.w > 0);
   if (items.length < 2) return;
   const total = items.reduce((a, it) => a + it.w, 0);
   // 1) El ganador se decide con probabilidad ponderada por puntos
